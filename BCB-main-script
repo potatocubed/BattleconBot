@@ -1,0 +1,503 @@
+// Battlecon Bot Gmail Script
+// Version 1.0
+
+function doEverything() {
+  // 1. Every minute, go looking for new emails. (unread)
+  // 2. Read it looking for key phrases. (mark as read)
+  // -- sender's email
+  // -- subject line is game ID (and by game I mean beat)
+  // -- move (Move: xx)
+  // -- active player (Active: xx)
+  // -- ante (Ante: )
+  // (Grab everything from colon to end-line, then trim it and call it a string.)
+  
+  var threads = GmailApp.search('is:unread');
+  var messages;
+  var this_one;
+  var player_email = "";
+  var gameID = "";
+  var move = "";
+  var active = "";
+  var ante = "";
+  
+  for (var j = 0; j < threads.length; j++) {
+    messages = threads[j].getMessages();
+    
+    // For each message...
+    for (var i = 0; i < messages.length; i++) {
+      Logger.log(messages[i].getSubject());
+      
+      // Grab the variables, then feed them to another function.
+      player_email = messages[i].getFrom();
+      
+      if (player_email.indexOf("battleconbot") > -1) {
+        // We're reading an email that we sent.
+        Logger.log("Email one of ours -- skip it!");
+        GmailApp.markMessageRead(messages[i]);
+        continue;
+      }
+      
+      gameID = messages[i].getSubject();
+      
+      if (gameID.indexOf("Battlecon Bot") > -1) {
+        // This lets us reply to emails without needing to re-type the game name.
+        gameID = gameID.slice(getPosition(gameID, "'", 1) + 1, getPosition(gameID, "'", 2));
+        Logger.log(gameID);
+      }
+      
+      this_one = messages[i].getPlainBody().split("\n");
+      
+      for (var k = 0; k < this_one.length; k++) {
+        if (this_one[k].toLowerCase().slice(0, 5) == "move:") {
+          move = this_one[k].slice(5).trim();
+          Logger.log(move);
+        }
+        if (this_one[k].toLowerCase().slice(0, 5) == "ante:") {
+          ante = this_one[k].slice(5).trim();
+          Logger.log(ante);
+        }
+        if (this_one[k].toLowerCase().slice(0, 7) == "active:") {
+          active = this_one[k].slice(7).trim();
+          Logger.log(active);
+        }
+        
+        // Out by one errors are the bane of my fucking life. >:| 
+      }
+      
+      checkDB(gameID, player_email, move, ante, active);
+      
+      GmailApp.markMessageRead(messages[i]);
+    }
+  }
+}
+
+function checkDB(gameID, player_email, move, ante, active) {
+  // 3. Is the game ID new? 
+  // 3a. Yes: Start a new game with this email in p1. Confirm move.
+  // 3b. No: Is the game in ante phase?
+  // 3b.ii. Go to step 4.
+  // 3b.i. Yes: Does this email match p1 or p2?
+  // 3b.i.ii. No: Bin.
+  // 3b.i.i. Yes: Is that player the prompted player?
+  // 3b.i.i.ii. No: Bin.
+  // 3b.i.i.i. Yes: Does the email contain an ante?
+  // 3b.i.i.i.i. Yes: Update ante, change prompted player, email players with update.
+  // 3b.i.i.i.ii. No: Set player_passed. Have both players passed?
+  // 3b.i.i.i.ii.i. Yes: Email players with moves and ante, delete beat.
+  // 3b.i.i.i.ii.ii. No: Change prompted player, email players with update.
+  
+  // 4. Does the game have an empty p2 slot?
+  // 4a. Yes: This email is p2. Fill in move, decide active player and player prompted, go to ante phase.
+  // 4b. No: Bin. (Although this should never happen: game has two players, but not in ante phase)
+  
+  // This does mean that once you've sent a move or ante you can't take it back, but I'm ok with that.
+  // This is meant to *work*, not be perfect.  
+  
+  var db = SpreadsheetApp.open(DriveApp.getFilesByName("Battlecon Bot Spreadsheet").next()).getSheetByName("Sheet1");
+  var freerow
+  var activerow
+  var activecol
+  var activeplayer = 0
+  var antestr
+  var i_checker = false
+  
+  Logger.log(db.getParent().getName());
+  
+  db.activate();
+  freerow = db.getLastRow() + 1;
+  
+  // GameID check
+  
+  // This is probably a better method but I have no idea how to work with 2D arrays in JS. =/
+  // activecol = db.getRange(2, 2, freerow - 1, 1);
+  
+  for (var i = 1; i < freerow; i++) {
+    // This is a goddamn mess of out-by-1 errors. Bah. =/
+    if (db.getRange(i, 2).getValue() == gameID) {
+      i_checker = true;
+      activerow = i;
+      break;
+    }    
+  }
+  
+  Logger.log(i_checker);
+  
+  // if (activecol.getValues().indexOf(gameID) > -1) {
+  if (i_checker) {
+    // Game exists.
+    // activerow = activecol.getValues().indexOf(gameID);
+    
+    // Are we in the ante phase?
+    if (db.getRange(activerow, 9).getValue() == 1) {
+      // Ante is on.
+      // Is this a registered player?
+      if (db.getRange(activerow, 3).getValue() == player_email) {
+        // This is player 1.
+        activeplayer = 1;
+      } else if (db.getRange(activerow, 4).getValue() == player_email) {
+        // This is player 2.
+        activeplayer = 2;
+      } else {
+        // This is no-one.
+        activeplayer = 0;
+        getInTheBin(player_email, gameID, 1);
+        return;
+      }
+      
+      // We should only get to this point if activeplayer is 1 or 2.
+      // Are they the prompted player?
+      if (activeplayer != db.getRange(activerow, 10).getValue()) {
+        // Nope
+        getInTheBin(player_email, gameID, 2);
+        return;
+      }
+      
+      // Does the email contain a valid ante?
+      if (ante != "" && ante != "none" && ante != "nothing") {
+        // Append the ante to the appropriate thing. Send an email with the new ante.
+        if (db.getRange(activerow, 6 + activeplayer).getValue() == "") {
+          db.getRange(activerow, 6 + activeplayer).setValue(ante);
+        } else {        
+          antestr = db.getRange(activerow, 6 + activeplayer).getValue().concat(" and ", ante);
+          db.getRange(activerow, 6 + activeplayer).setValue(antestr);
+        }
+        
+        // Oh, also: Change the passed flag to false again.
+        db.getRange(activerow, 10 + activeplayer).setValue(0);
+        
+        if (db.getRange(activerow, 10).getValue() == 1) {
+          var p1 = db.getRange(activerow, 3).getValue();
+          var p2 = db.getRange(activerow, 4).getValue();
+          var p1ante = db.getRange(activerow, 7).getValue();
+          var p2ante = db.getRange(activerow, 8).getValue();
+        } else {
+          var p1 = db.getRange(activerow, 4).getValue();
+          var p2 = db.getRange(activerow, 3).getValue();
+          var p1ante = db.getRange(activerow, 8).getValue();
+          var p2ante = db.getRange(activerow, 7).getValue();
+        }
+        
+        if (p1ante == "") {
+            p1ante = "nothing";
+        }
+        
+        if (p2ante == "") {
+            p2ante = "nothing";
+        }
+        
+        // p1 in this case is the person who just anted.
+        
+        sendMail(p1, gameID, 102, "", p1ante, "", p2ante); // Confirm
+        sendMail(p2, gameID, 103, "", p2ante, "", p1ante); // Prompt
+        
+        changePrompt(db, activerow, activeplayer);
+        timeStamp(db, activerow);
+        
+      } else {
+        // The active player has passed.
+        db.getRange(activerow, 10 + activeplayer).setValue(1);
+        
+        // Have both players passed?
+        if (db.getRange(activerow, 11).getValue() + db.getRange(activerow, 12).getValue() > 1) {
+          // Yes. Send mail, delete row.
+          
+          var p1 = db.getRange(activerow, 3).getValue();
+          var p1move = db.getRange(activerow, 5).getValue();
+          var p1ante = db.getRange(activerow, 7).getValue();
+          if (p1ante == "") {
+            p1ante = "nothing";
+          }
+          
+          var p2 = db.getRange(activerow, 4).getValue();
+          var p2move = db.getRange(activerow, 6).getValue();
+          var p2ante = db.getRange(activerow, 8).getValue();
+          if (p2ante == "") {
+            p2ante = "nothing";
+          }
+          
+          sendMail(p1, gameID, 101, p1move, p1ante, p2move, p2ante);
+          sendMail(p2, gameID, 101, p2move, p2ante, p1move, p1ante);
+          
+          // Aaaaand we're done.
+          db.deleteRow(activerow);
+        } else {
+          // No. Prompt next player for ante.
+          
+          if (db.getRange(activerow, 10).getValue() == 1) {
+            var p1 = db.getRange(activerow, 3).getValue();
+            var p2 = db.getRange(activerow, 4).getValue();
+            var p1ante = db.getRange(activerow, 7).getValue();
+            var p2ante = db.getRange(activerow, 8).getValue();
+          } else {
+            var p1 = db.getRange(activerow, 4).getValue();
+            var p2 = db.getRange(activerow, 3).getValue();
+            var p1ante = db.getRange(activerow, 8).getValue();
+            var p2ante = db.getRange(activerow, 7).getValue();
+          }
+        
+          if (p1ante == "") {
+            p1ante = "nothing";
+          }
+        
+          if (p2ante == "") {
+            p2ante = "nothing";
+          }
+        
+          // p1 in this case is the person who just anted.
+        
+          sendMail(p1, gameID, 102, "", p1ante, "", p2ante); // Confirm
+          sendMail(p2, gameID, 103, "", p2ante, "", p1ante); // Prompt
+          
+          changePrompt(db, activerow, activeplayer);
+          timeStamp(db, activerow);
+        }
+      }
+      
+    } else {
+      // Still looking for moves.
+      // Eliminate player 1 sending multiple moves.
+      if (db.getRange(activerow, 3).getValue() == player_email) {
+        getInTheBin(player_email, gameID, 0);
+        return;
+      }
+      
+      // Check to make sure player 2 actually sent a move.
+      if (move == "") {
+        getInTheBin(player_email, gameID, 3);
+        return;
+      }
+      
+      // Log player 2 + move.
+      db.getRange(activerow, 4).setValue(player_email);
+      db.getRange(activerow, 6).setValue(move);
+      if (active.toLowerCase() == "y" || active.toLowerCase() == "true" || active.toLowerCase() == "yes") {
+        db.getRange(activerow, 15).setValue(1);
+      } else {
+        db.getRange(activerow, 15).setValue(0);
+      }
+      
+      // Set ante mode, prompt active player for ante
+      db.getRange(activerow, 9).setValue(1);
+      
+      // Let's work out who's active...
+      var p1a = db.getRange(activerow, 14).getValue();
+      var p2a = db.getRange(activerow, 15).getValue();
+      
+      if (p1a + p2a == 1) {
+        // We only have one active player, which is good.
+        if (p1a > p2a) {
+          db.getRange(activerow, 10).setValue(1);
+        } else {
+          db.getRange(activerow, 10).setValue(2);
+        }
+      } else {
+        // Fuck it, it's player 1.
+        db.getRange(activerow, 10).setValue(1);
+      }
+      
+      if (db.getRange(activerow, 10).getValue() == 1) {
+            var p1 = db.getRange(activerow, 3).getValue();
+            var p2 = db.getRange(activerow, 4).getValue();
+            var p1move = db.getRange(activerow, 5).getValue();
+            var p2move = db.getRange(activerow, 6).getValue();
+          } else {
+            var p1 = db.getRange(activerow, 4).getValue();
+            var p2 = db.getRange(activerow, 3).getValue();
+            var p1move = db.getRange(activerow, 6).getValue();
+            var p2move = db.getRange(activerow, 5).getValue();
+          }
+      
+      // p1 in this case is the person whose ante is up.
+      
+      sendMail(p1, gameID, 105, p1move);
+      sendMail(p2, gameID, 104, p2move);
+      
+      timeStamp(db, activerow);
+    }
+    
+  } else {
+    // Game is new and this is player 1.
+    
+    // First things first -- did they specify a move?
+    if (move == "") {
+      getInTheBin(player_email, gameID, 3);
+      return;
+    }
+    
+    activerow = freerow;
+    //startNewGame(activerow, gameID, player_email, move, active);
+    db.getRange(activerow, 2).setValue(gameID);
+    db.getRange(activerow, 3).setValue(player_email);
+    db.getRange(activerow, 5).setValue(move);
+    db.getRange(activerow, 9).setValue(0);
+    db.getRange(activerow, 10).setValue(0);
+    db.getRange(activerow, 11).setValue(0);
+    db.getRange(activerow, 12).setValue(0);
+    
+    if (active.toLowerCase() == "y" || active.toLowerCase() == "true" || active.toLowerCase() == "yes") {
+        db.getRange(activerow, 14).setValue(1);
+      } else {
+        db.getRange(activerow, 14).setValue(0);
+      }
+    
+    timeStamp(db, activerow);
+    
+    // You could probably do this more efficiently with an array and setValues([][]).
+    // But w/e. It works, it'll do for now.
+    
+    sendMail(player_email, gameID, 100, move);
+  }
+}
+
+function changePrompt(db, activerow, activeplayer) {
+  if (activeplayer == 1) {
+    db.getRange(activerow, 10).setValue(2);
+  } else {
+    db.getRange(activerow, 10).setValue(1);
+  }
+}
+
+function sendMail(player_email, gameID, reason, move, ante, p2move, p2ante) {
+  if (!move) {
+    var move = "ERROR - a move where a move should not be";
+  }
+  
+  if (!ante) {
+    var ante = "ERROR - an ante where an ante should not be";
+  }
+  
+  if (!p2move) {
+    var p2move = "ERROR - a p2 move where a move should not be";
+  }
+  
+  if (!p2ante) {
+    var p2ante = "ERROR - a p2 ante where an ante should not be";
+  }
+  
+  // REASONS
+  // 0 = Can't be both players.
+  // 1 = Anteing in a game you're not in.
+  // 2 = Trying to ante when it's not your go.
+  // 3 = You needed to send a move, and didn't.
+  
+  // 100 = New beat confirmation.
+  // 101 = All moves and antes in, both players have passed.
+  // 102 = Ante confirmation.
+  // 103 = Ante prompt.
+  // 104 = Moves completed, ante confirmation.
+  // 105 = Moves completed, ante prompt.
+  
+  var subj = "Battlecon Bot: Command rejected in game '" + gameID + "'";
+  var text = "Error " + reason + ": ";
+  
+  switch (reason) {
+    case 0:
+      text = text + "You have already sent your move for this game. No takebacks! (Yet)";
+      break;
+    case 1:
+      text = text + "You're trying to ante in a game you're not playing in. Oops!";
+      break;
+    case 2:
+      text = text + "We're waiting for your opponent to ante (or not) so your new ante has been ignored.";
+      break;
+    case 3:
+      text = text + "You need to specify a move, but didn't. Use 'Move:' followed by your move of choice.";
+      break;
+    case 100:
+      subj = "Battlecon Bot: Move confirmed in game '" + gameID + "'";
+      text = "You have successfully started a new beat with the move " + move + ". Now waiting for your opponent.";
+      break;
+    case 101:
+      subj = "Battlecon Bot: Moves complete in game '" + gameID + "'!";
+      text = "You have anted " + ante + " and you flip " + move + "!" + "\n\n" + "Your opponent has anted " + p2ante + " and flips " + p2move + "!" + "\n\n" + "You'll have to work out what happens next by yourselves.";
+      break;
+    case 102:
+      subj = "Battlecon Bot: Ante confirmed in game '" + gameID + "'";
+      text = "You have successfully anted " + ante + ". Opponent's current ante is " + p2ante + ". Now waiting for your opponent.";
+      break;
+    case 103:
+      subj = "Battlecon Bot: Your chance to ante in game '" + gameID + "'";
+      text = "Your opponent's current ante is " + p2ante + ". Your current ante is " + ante + ". It is your turn to ante." + "\n\n" + "Reply to this message with 'Ante:' followed by your ante if you wish to ante, or with a blank email if you wish to pass.";
+      break;
+    case 104:
+      subj = "Battlecon Bot: Moves selected in game '" + gameID + "'";
+      text = "You and your opponent have selected your moves. (Yours was " + move + ".) Now waiting for your opponent to ante, or not.";
+      break;
+    case 105:
+      subj = "Battlecon Bot: Your chance to ante in game '" + gameID + "'";
+      text = "You and your opponent have selected your moves. (Yours was " + move + ".) You now have the chance to ante." + "\n\n" + "Reply to this message with 'Ante:' followed by your ante if you wish to ante, or with a blank email if you wish to pass.";
+      break;
+    default:
+      text = "You've hit an undefined error! Oh dear. :(";
+  }
+  
+  text = text +  "\n\n" + "Much love, Battlecon Bot."
+  
+  GmailApp.sendEmail(player_email, subj, text);
+}
+
+function timeStamp(db, activerow) {
+  db.getRange(activerow, 13).setValue(Date());
+  Logger.log("Time stamped.");
+}
+
+function getInTheBin(player_email, gameID, reason) {
+  var rtext
+  
+  switch (reason) {
+    case 0:
+      rtext = "Can't be player 1 and player 2 in the same game.";
+      break;
+    case 1:
+      rtext = "Can't ante in a game you're not in.";
+      break;
+    case 2:
+      rtext = "It's not your turn to ante yet.";
+      break;
+    case 3:
+      rtext = "No move where a move was expected.";
+      break;
+    default:
+      rtext = "UNDEFINED ERROR.";
+  }
+  
+  Logger.log("Get In The Bin: " + rtext + " (" + reason + ")");
+  
+  // Send an email to the sender saying their move was rejected, and why.
+  sendMail(player_email, gameID, reason);
+}
+
+function getPosition(str, m, i) {
+   return str.split(m, i).join(m).length;
+}
+
+function cleanUp() {
+  var db = SpreadsheetApp.open(DriveApp.getFilesByName("Battlecon Bot Spreadsheet").next()).getSheetByName("Sheet1");
+  var now = new Date();
+  var then;
+  var daynow = now.getDate();
+  var daythen;
+  
+  for (var i = 2; i <= db.getLastRow(); i++) {
+    then = new Date(db.getRange(i, 13).getValue());
+    daythen = then.getDate();
+    
+    //Logger.log("Row " + i);
+    
+    if (daynow > 8) {
+      if (daynow - 7 >= daythen) {
+        db.deleteRow(i);
+        i--;
+      }
+    } else {
+      if (daynow + 21 >= daythen) {
+        // Oh God this is so hacky.
+        // But I can't be bothered doing it exactly. A few days here or there is no big deal.
+        db.deleteRow(i);
+        i--;
+      }
+    }
+      
+    //Logger.log("Row " + i);
+  }
+}
