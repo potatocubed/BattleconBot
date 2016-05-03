@@ -28,11 +28,13 @@ function doEverything() {
   var character = "";
   var discards = "";
   
+  Logger.log("Running...");
+  
   for (var j = 0; j < threads.length; j++) {
     messages = threads[j].getMessages();
     
     // For each message...
-    for (var i = messages.length; i > 0; i--) {
+    for (var i = messages.length - 1; i >= 0; i--) {
       Logger.log("Email Number " + i + ", Subject: " + messages[i].getSubject());
       
       if (messages[i].isUnread() == false) {
@@ -160,10 +162,10 @@ function doEverything() {
       GmailApp.markMessageRead(messages[i]);
       
       // At this point, we want to read upstream and mark all messages by the same person as read.
-      for (var j = i; j > 0; j--) {
-        if (messages[j].getFrom() == player_email) {
-          messages[j].markRead();
-          Logger.log("Message " + j + " marked as read.");
+      for (var x = i; x > 0; x--) {
+        if (messages[x].getFrom() == player_email) {
+          messages[x].markRead();
+          Logger.log("Message " + x + " marked as read.");
         }
       }
     }
