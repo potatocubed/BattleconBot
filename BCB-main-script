@@ -1,5 +1,10 @@
 // Battlecon Bot Gmail Script
-// Version 1.0
+// By Chris Longhurst a.k.a. potatocubed
+// Version 1.1
+
+// Changelog
+// 1.1: In the case where both or neither player claims active status, BCB now chooses at random.
+// 1.0: Bot exists, functions.
 
 function doEverything() {
   // 1. Every minute, go looking for new emails. (unread)
@@ -291,8 +296,11 @@ function checkDB(gameID, player_email, move, ante, active) {
           db.getRange(activerow, 10).setValue(2);
         }
       } else {
-        // Fuck it, it's player 1.
-        db.getRange(activerow, 10).setValue(1);
+        // Previously, we just assumed it was player 1 (i.e. whoever got their email read first)
+        // db.getRange(activerow, 10).setValue(1);
+        
+        // But now we choose someone at random (to facilitate Beat 1)
+        db.getRange(activerow, 10).setValue(Math.floor((Math.random() * 2) + 1));
       }
       
       if (db.getRange(activerow, 10).getValue() == 1) {
