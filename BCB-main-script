@@ -1,8 +1,9 @@
 // Battlecon Bot Gmail Script
 // By Chris Longhurst a.k.a. potatocubed
-// Version 1.1
+// Version 1.2
 
 // Changelog
+// 1.2: Fixed threading bug and line-truncating bug.
 // 1.1: In the case where both or neither player claims active status, BCB now chooses at random.
 // 1.0: Bot exists, functions.
 
