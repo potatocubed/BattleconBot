@@ -16,6 +16,8 @@ function doEverything() {
   // -- ante (Ante: )
   // (Grab everything from colon to end-line, then trim it and call it a string.)
   
+  Logger.log("Running...");
+  
   var db = SpreadsheetApp.open(DriveApp.getFilesByName("Battlecon Bot Spreadsheet").next()).getSheetByName("Sheet1");
   var threads = GmailApp.search('is:unread');
   var messages;
@@ -27,8 +29,6 @@ function doEverything() {
   var ante = "";
   var character = "";
   var discards = "";
-  
-  Logger.log("Running...");
   
   for (var j = 0; j < threads.length; j++) {
     messages = threads[j].getMessages();
@@ -63,9 +63,24 @@ function doEverything() {
       
       Logger.log("Game ID: " + gameID);
       
-      this_one = messages[i].getPlainBody().split("\n");
+      //this_one = messages[i].getPlainBody().split("\n");
+      this_one = messages[i].getBody().split("\n");
       
       for (var k = 0; k < this_one.length; k++) {
+        var cut1;
+        var cut2;
+        var cutstr;
+        
+        // The previous system was finding problematic line breaks,
+        // so here's a more complex one.
+        while (this_one[k].indexOf("<") > -1) {
+          Logger.log("Trimming html...");
+          cut1 = this_one[k].indexOf("<");
+          cut2 = this_one[k].indexOf(">");
+          cutstr = this_one[k].substr(cut1, cut2 + 1);
+          this_one[k] = this_one[k].replace(cutstr, "");
+        }
+        
         if (this_one[k].toLowerCase().slice(0, 5) == "move:") {
           move = this_one[k].slice(5).trim();
           Logger.log("Move: " + move);
@@ -790,6 +805,8 @@ function changePrompt(db, activerow, activeplayer) {
 }
 
 function sendMail(player_email, gameID, reason, move, ante, p2move, p2ante) {
+  return; // For debugging without spam.
+  
   if (!move) {
     var move = "ERROR - a move where a move should not be";
   }
