@@ -1,8 +1,10 @@
 // Battlecon Bot Gmail Script
 // By Chris Longhurst a.k.a. potatocubed
-// Version 1.2
+// Version 1.21
 
 // Changelog
+// 1.21: Changed timestamp and cleanup routines to suck less.
+//       Added 'MoveSkip' command to allow ante-skipping.
 // 1.2: Fixed threading bug and line-truncating bug.
 // 1.1: In the case where both or neither player claims active status, BCB now chooses at random.
 // 1.0: Bot exists, functions.
@@ -30,6 +32,7 @@ function doEverything() {
   var ante = "";
   var character = "";
   var discards = "";
+  var skipAnte = false;
   
   for (var j = 0; j < threads.length; j++) {
     messages = threads[j].getMessages();
@@ -86,6 +89,12 @@ function doEverything() {
         if (this_one[k].toLowerCase().slice(0, 5) == "move:") {
           move = this_one[k].slice(5).trim();
           Logger.log("Move: " + move);
+        }
+        if (this_one[k].toLowerCase().slice(0, 9) == "moveskip:") {
+          move = this_one[k].slice(9).trim();
+          skipAnte = true;
+          Logger.log("Move: " + move);
+          Logger.log("Skip ante");
         }
         if (this_one[k].toLowerCase().slice(0, 5) == "ante:") {
           ante = this_one[k].slice(5).trim();
@@ -181,7 +190,7 @@ function doEverything() {
         }
       } else {
         Logger.log("MAIN BRANCH");
-        checkDB(gameID, player_email, move, ante, active);
+        checkDB(gameID, player_email, move, ante, active, skipAnte);
       }
       
       GmailApp.markMessageRead(messages[i]);
@@ -528,7 +537,7 @@ function newGame(db, gameID, player_email, character) {
 }
 
 
-function checkDB(gameID, player_email, move, ante, active) {
+function checkDB(gameID, player_email, move, ante, active, skipAnte) {
   // 3. Is the game ID new? 
   // 3a. Yes: Start a new game with this email in p1. Confirm move.
   // 3b. No: Is the game in ante phase?
@@ -732,28 +741,76 @@ function checkDB(gameID, player_email, move, ante, active) {
       } else {
         db.getRange(activerow, 15).setValue(0);
       }
+      if (skipAnte == true) {
+        db.getRange(activerow, 17).setValue(1);
+      } else {
+        db.getRange(activerow, 17).setValue(0);
+      }
       
-      // Set ante mode, prompt active player for ante
-      db.getRange(activerow, 9).setValue(1);
-      
-      // Let's work out who's active...
-      var p1a = db.getRange(activerow, 14).getValue();
-      var p2a = db.getRange(activerow, 15).getValue();
-      
-      if (p1a + p2a == 1) {
-        // We only have one active player, which is good.
-        if (p1a > p2a) {
-          db.getRange(activerow, 10).setValue(1);
+      if (db.getRange(activerow, 16).getValue() + db.getRange(activerow, 17).getValue() == 2) {
+        // If both players have chosen to skip ante, jump right to move reveal.
+        // Send mail, delete row.
+        
+        var p1 = db.getRange(activerow, 3).getValue();
+        var p1move = db.getRange(activerow, 5).getValue();
+        var p1ante = db.getRange(activerow, 7).getValue();
+        if (p1ante == "") {
+          p1ante = "nothing";
+        }
+        
+        var p2 = db.getRange(activerow, 4).getValue();
+        var p2move = db.getRange(activerow, 6).getValue();
+        var p2ante = db.getRange(activerow, 8).getValue();
+        if (p2ante == "") {
+          p2ante = "nothing";
+        }
+        
+        sendMail(p1, gameID, 101, p1move, p1ante, p2move, p2ante);
+        sendMail(p2, gameID, 101, p2move, p2ante, p1move, p1ante);
+        
+        // Aaaaand we're done.
+        db.deleteRow(activerow);
+        return;
+      } else if (db.getRange(activerow, 16).getValue() + db.getRange(activerow, 17).getValue() == 1) {
+        // If one player has chosen to skip, set their thing to 'passed' and set the other one to active.
+        if (db.getRange(activerow, 16) == 1) {
+          // Player 1 has skipped.
+          db.getRange(activerow, 10).setValue(2);  // prompt player 2
+          db.getRange(activerow, 11).setValue(1);  // p1passed
         } else {
-          db.getRange(activerow, 10).setValue(2);
+          // Player 2 has skipped.
+          db.getRange(activerow, 10).setValue(1);  // prompt player 1
+          db.getRange(activerow, 12).setValue(1);  // p2passed
         }
       } else {
-        // Previously, we just assumed it was player 1 (i.e. whoever got their email read first)
-        // db.getRange(activerow, 10).setValue(1);
+        // If neither have chosen to skip we work out active player and go from there.
+        // Let's work out who's active...
+        var p1a = db.getRange(activerow, 14).getValue();
+        var p2a = db.getRange(activerow, 15).getValue();
         
-        // But now we choose someone at random (to facilitate Beat 1)
-        db.getRange(activerow, 10).setValue(Math.floor((Math.random() * 2) + 1));
+        if (p1a + p2a == 1) {
+          // We only have one active player, which is good.
+          if (p1a > p2a) {
+            db.getRange(activerow, 10).setValue(1);
+          } else {
+            db.getRange(activerow, 10).setValue(2);
+          }
+        } else {
+          // Previously, we just assumed it was player 1 (i.e. whoever got their email read first)
+          // db.getRange(activerow, 10).setValue(1);
+          
+          // But now we choose someone at random (to facilitate Beat 1)
+          db.getRange(activerow, 10).setValue(Math.floor((Math.random() * 2) + 1));
+        }
       }
+      
+      
+      
+      // TESTS: Both players skip, neither player skips, p1 skips, p2 skips.
+      
+      // If you get this far, then someone wants to ante.
+      // Set ante mode, prompt active player for ante.
+      db.getRange(activerow, 9).setValue(1);
       
       if (db.getRange(activerow, 10).getValue() == 1) {
             var p1 = db.getRange(activerow, 3).getValue();
@@ -789,16 +846,22 @@ function checkDB(gameID, player_email, move, ante, active) {
     db.getRange(activerow, 2).setValue(gameID);
     db.getRange(activerow, 3).setValue(player_email);
     db.getRange(activerow, 5).setValue(move);
-    db.getRange(activerow, 9).setValue(0);
-    db.getRange(activerow, 10).setValue(0);
-    db.getRange(activerow, 11).setValue(0);
-    db.getRange(activerow, 12).setValue(0);
+    db.getRange(activerow, 9).setValue(0);   // game state
+    db.getRange(activerow, 10).setValue(0);  // player prompt
+    db.getRange(activerow, 11).setValue(0);  // p1passed
+    db.getRange(activerow, 12).setValue(0);  // p2passed
+    
+    if (skipAnte == true) {
+      db.getRange(activerow, 16).setValue(1);
+    } else {
+      db.getRange(activerow, 16).setValue(0);
+    }
     
     if (active.toLowerCase() == "y" || active.toLowerCase() == "true" || active.toLowerCase() == "yes") {
-        db.getRange(activerow, 14).setValue(1);
-      } else {
-        db.getRange(activerow, 14).setValue(0);
-      }
+      db.getRange(activerow, 14).setValue(1);
+    } else {
+      db.getRange(activerow, 14).setValue(0);
+    }
     
     timeStamp(db, activerow);
     
@@ -928,7 +991,9 @@ function sendMail(player_email, gameID, reason, move, ante, p2move, p2ante) {
 }
 
 function timeStamp(db, activerow) {
-  db.getRange(activerow, 13).setValue(Date());
+  // db.getRange(activerow, 13).setValue(Date());
+  // Basically, every time the row is accessed, set 'days since last used' to 0.
+  db.getRange(activerow, 13).setValue(0);
   Logger.log("Time stamped.");
 }
 
@@ -969,6 +1034,24 @@ function getPosition(str, m, i) {
 }
 
 function cleanUp() {
+  var count;  // This counts days since last accessed.
+  var db = SpreadsheetApp.open(DriveApp.getFilesByName("Battlecon Bot Spreadsheet").next()).getSheetByName("Sheet1");
+  for (var i = 2; i <=db.getLastRow(); i++) {
+    Logger.log("Cleaning up row " + i);
+    count = db.getRange(i, 13).getValue();
+    if (count >= 7) {  // This game has been untouched for a week.
+      Logger.log ("Deleting row " + i + "; game inactive for " + count + " days.");
+      db.deleteRow(i);
+      i--;
+    } else {
+      Logger.log ("Incrementing game count to " + (count + 1));
+      db.getRange(i, 13).setValue(count + 1);
+    }
+  }
+}
+
+/*  This function is gaaaaaaarbage.
+function cleanUp() {
   var db = SpreadsheetApp.open(DriveApp.getFilesByName("Battlecon Bot Spreadsheet").next()).getSheetByName("Sheet1");
   var now = new Date();
   var then;
@@ -987,16 +1070,9 @@ function cleanUp() {
         i--;
       }
     } else {
-      /* This had some bad side effects.
-      if (daynow + 21 >= daythen) {
-        // Oh God this is so hacky.
-        // But I can't be bothered doing it exactly. A few days here or there is no big deal.
-        db.deleteRow(i);
-        i--;
-      } */
       // Do nothing.
     }
       
     //Logger.log("Row " + i);
   }
-}
+} */
