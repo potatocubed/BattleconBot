@@ -1,7 +1,17 @@
 # BattleconBot
 A Gmail script to facilitate PBP games of BattleCON.
 
-**INSTRUCTIONS**
+**INSTRUCTIONS FOR SETUP**
+
+* Get you a gmail address.
+* While signed in as that email address, create a new Google Script (called anything you like) and paste the code from here into it.
+* Create a Google Sheet called 'Battlecon Bot Spreadsheet'. You can call it something different if you like, but you'll need to change the database references in the script to point to the right thing.
+* Go back to your script and under the Resources menu select 'Current Project's Triggers'.
+* Set 'doEverything' to run every minute and 'cleanUp' to run once per day.
+* And that's it!
+* *Optional:* Send a few messages to your new address to check it's working.
+
+**INSTRUCTIONS FOR PLAYERS**
 
 * You and your opponent choose characters* and come up with a unique game ID between you. This is also where you'll set up the PBP thread, etc.
 
