@@ -19,7 +19,7 @@ A Gmail script to facilitate PBP games of BattleCON.
 
 * Each of you sends an email to sabattleconbot at gmail doot com. The subject line should be your game ID. In the body of the email you should put:
 
-*Required:* "Move:" followed by the move you've chosen.<br /> **OR** "MoveSkip:" followed by the move if you know you're not going to ante.
+*Required:* "Move:" followed by the move you've chosen. **OR** "MoveSkip:" followed by the move if you know you're not going to ante.<br />
 *Optional:* "Active:" followed by "Y" if you're the active player this beat. For the purposes of finding out who antes first.
 
 (If you use both, make sure they're on different lines.)
